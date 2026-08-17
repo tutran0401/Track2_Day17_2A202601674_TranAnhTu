@@ -24,12 +24,15 @@
 
 ## 0 · Kết quả `make verify`
 
-Output ba lượt chạy
+Output nguyên văn, ba lượt chạy, chạy trên repo đã dọn sạch:
 
 ```
-  run 1/3 … 107.5s
-  run 2/3 … 86.9s
-  run 3/3 … 84.0s
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LAB 17 · make verify
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  run 1/3 … 95.1s
+  run 2/3 … 90.5s
+  run 3/3 … 91.2s
 
   BẢNG                  ỔN ĐỊNH          SỐ HÀNG     KỲ VỌNG   GHI CHÚ
   ──────────────────────────────────────────────────────────────────────────
@@ -56,7 +59,14 @@ Output ba lượt chạy
     kết quả truy vấn không đổi                ✓
   DAG: catchup / max_active_runs              ✓ False / 1
 
-  TỔNG KẾT                                        4/4 tiêu chí đạt
+  TỔNG KẾT
+  ──────────────────────────────────────────────────────────────────────────
+  ✓  1 · gold_training_set idempotent & đúng số hàng
+  ✓  2 · gold_feature_daily đủ hàng (dữ liệu về muộn)
+  ✓  3 · contract + quarantine + dbt test
+  ✓  4 · gold_doc_chunks vẫn ổn định (đối chứng)
+  ──────────────────────────────────────────────────────────────────────────
+  4/4 tiêu chí đạt
 ```
 
 
