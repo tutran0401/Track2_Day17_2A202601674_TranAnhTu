@@ -6,6 +6,10 @@ models:
     columns:
       - name: ticket_id
         description: "Khoá entity."
+        # Bất biến của nhiệm vụ 1: merge theo ticket_id thì chạy lại bao nhiêu
+        # lượt cũng giữ đúng 1 hàng / 1 ticket. Test này bắt lỗi ngay khi ai đó
+        # đổi incremental_strategy về append.
+        tests: [unique, not_null]
 
   - name: gold_feature_daily
     description: "Đặc trưng theo ngày cho agent định tuyến. Grain: (event_date, customer_id)."

@@ -57,33 +57,79 @@ SRC = DATA / "gold_events"
 DST = DATA / "gold_events_v2"
 
 
+# Ba quyết định, kèm lý do:
+#
+#   PARTITION_BY (event_date)
+#       Truy vấn dashboard lọc theo HAI cột: customer_name và ngày. Chỉ một
+#       trong hai được lên đường dẫn, vì mỗi cột partition thêm vào là một tầng
+#       thư mục nữa và số thư mục nhân lên theo tích số lượng giá trị.
+#       event_date có 14 giá trị -> 14 thư mục, engine bỏ qua 13/14 dataset
+#       trước khi mở bất kỳ file nào. customer_name có 650 giá trị -> 650 thư
+#       mục, mỗi thư mục vài trăm hàng: đó chính là small-file problem cũ được
+#       dựng lại dưới dạng khác.
+#
+#   ORDER BY customer_name, event_time
+#       Cột partition đã lo việc lọc theo ngày; thống kê min/max của row group
+#       chỉ còn hữu ích cho customer_name. Sắp theo customer_name để các hàng
+#       của cùng một khách nằm liền nhau, nhờ đó min/max của mỗi row group phủ
+#       một dải hẹp và engine bỏ qua được row group không chứa 'ACME'.
+#       event_time là khoá phụ, cho dữ liệu trong một khách hàng có thứ tự ổn
+#       định (kết quả tái lập được giữa các lần chạy).
+#
+#   ROW_GROUP_SIZE = 5000
+#       130.683 hàng / 14 ngày ≈ 9.300 hàng mỗi ngày. Mặc định 122.880 gói
+#       trọn một ngày vào MỘT row group, min/max của nó khi đó trải từ khách
+#       hàng đầu tiên tới khách hàng cuối cùng — phủ toàn bộ miền giá trị nên
+#       không lọc được gì. 5.000 hàng chia mỗi ngày thành ~7 row group, mỗi
+#       nhóm phủ một dải customer_name hẹp, mà vẫn đủ lớn để không rơi lại vào
+#       chi phí đọc theo lô của file tí hon.
+PARTITION_COL = "event_date"
+ROW_GROUP_SIZE = 5_000
+
+
 def main() -> int:
     con = duckdb.connect()
 
     n_src = len(list(SRC.glob("*.parquet")))
     print(f"  nguồn : {SRC}  ({n_src:,} file)")
+    if n_src == 0:
+        print("\n  không tìm thấy file nguồn — chạy `python seed/generate.py --extra` trước.\n")
+        return 1
 
-    # TODO(nhiệm vụ 4): hiện thực khung COPY ... TO ... ở phần docstring.
-    #
-    #   con.execute(f"""
-    #       copy (
-    #           select * from read_parquet('{SRC}/*.parquet')
-    #           order by ...
-    #       ) to '{DST}' (
-    #           format parquet,
-    #           partition_by (...),
-    #           overwrite_or_ignore,
-    #           row_group_size ...
-    #       )
-    #   """)
-    #
-    # Sau đó kiểm tra không mất hàng nào:
-    #
-    #   assert <số row dataset cũ> == <số row dataset mới>
+    src_rows = con.execute(
+        f"select count(*) from read_parquet('{SRC.as_posix()}/*.parquet')"
+    ).fetchone()[0]
 
-    print("\n  tools/compact.py chưa được hiện thực — đây là nhiệm vụ 4.")
-    print("  Mở file này, đọc phần KHUNG THỰC HIỆN ở đầu file và điền vào TODO.")
-    print("  Hướng dẫn từng bước: GUIDE.md mục 4.\n")
+    # Nguồn ĐÃ CÓ sẵn cột event_date. Nếu thêm một cột dẫn xuất cùng tên, DuckDB
+    # sẽ đổi tên nó thành event_date_1 và partition theo cột đó — truy vấn lọc
+    # `event_date = ...` khi ấy đọc cột trong FILE chứ không đọc đường dẫn, và
+    # partition pruning không bao giờ kích hoạt.
+    con.execute(f"""
+        copy (
+            select *
+            from read_parquet('{SRC.as_posix()}/*.parquet')
+            order by customer_name, event_time
+        ) to '{DST.as_posix()}' (
+            format          parquet,
+            partition_by    ({PARTITION_COL}),
+            overwrite_or_ignore,
+            row_group_size  {ROW_GROUP_SIZE}
+        )
+    """)
+
+    dst_files = sorted(DST.glob("**/*.parquet"))
+    dst_rows = con.execute(
+        f"select count(*) from read_parquet('{DST.as_posix()}/**/*.parquet', "
+        f"hive_partitioning = true)"
+    ).fetchone()[0]
+
+    # Nén lại mà mất hàng thì mọi con số đo được sau đó đều vô nghĩa.
+    assert src_rows == dst_rows, f"mất hàng: {src_rows:,} -> {dst_rows:,}"
+
+    print(f"  đích  : {DST}  ({len(dst_files):,} file, {dst_rows:,} hàng)")
+    print(f"  layout: partition_by({PARTITION_COL}) · "
+          f"order by customer_name, event_time · row_group_size {ROW_GROUP_SIZE:,}")
+    print("\n  xong. Đo lại bằng: python tools/explain.py\n")
     return 0
 
 

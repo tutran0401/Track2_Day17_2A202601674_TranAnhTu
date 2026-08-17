@@ -45,16 +45,24 @@
 #}
 
 {% macro normalize_priority(col) %}
-    -- TODO(nhiệm vụ 3): thay biểu thức dưới đây bằng một khối CASE xử lý
-    -- đủ ba nhóm ở trên.
-    --
-    --     case
-    --         when <nhóm 1: đã là số hợp lệ>  then <giữ nguyên>
-    --         when <nhóm 2: nhãn chữ>         then <số tương ứng>
-    --         ...
-    --         else null                        -- nhóm 3
-    --     end
-    try_cast({{ col }} as integer)
+    -- Chuẩn hoá về NULL trước khi so khớp: trim khoảng trắng, hạ chữ thường.
+    -- Nhờ đó ' High ' và 'HIGH' không rơi nhầm vào nhóm 3.
+    case
+        -- nhóm 1 — đã đúng contract cũ, giữ nguyên giá trị
+        when trim(lower(cast({{ col }} as varchar))) in ('1', '2', '3', '4')
+            then cast(trim(cast({{ col }} as varchar)) as integer)
+
+        -- nhóm 2 — schema evolution: nguồn đổi cách biểu diễn từ 2026-08-10,
+        -- ý nghĩa không đổi. Quy về số theo tài liệu API của team backend.
+        when trim(lower(cast({{ col }} as varchar))) = 'urgent' then 1
+        when trim(lower(cast({{ col }} as varchar))) = 'high'   then 2
+        when trim(lower(cast({{ col }} as varchar))) = 'medium' then 3
+        when trim(lower(cast({{ col }} as varchar))) = 'low'    then 4
+
+        -- nhóm 3 — dữ liệu hỏng thật: '', NULL, 'P1', 'P2', 'unknown', và cả
+        -- '0' / '5' / '-1' (đúng là số nhưng nằm ngoài miền 1..4 của contract).
+        else null
+    end
 {% endmacro %}
 
 
@@ -64,6 +72,13 @@
     hơn (rỗng / NULL / là số nhưng ngoài khoảng / là chuỗi lạ).
 #}
 {% macro priority_reject_reason(col) %}
-    -- TODO(nhiệm vụ 3, không bắt buộc): phân biệt các loại lỗi khác nhau.
-    'priority không quy đổi được về 1..4'
+    case
+        when {{ col }} is null
+            then 'priority NULL — nguồn không gửi trường này'
+        when trim(cast({{ col }} as varchar)) = ''
+            then 'priority rỗng'
+        when try_cast(trim(cast({{ col }} as varchar)) as integer) is not null
+            then 'priority là số nhưng ngoài miền 1..4'
+        else 'priority là chuỗi không nằm trong bảng quy đổi (urgent/high/medium/low)'
+    end
 {% endmacro %}

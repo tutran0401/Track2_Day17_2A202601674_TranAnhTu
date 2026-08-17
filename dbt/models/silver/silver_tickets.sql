@@ -35,16 +35,30 @@
 
 {{ config(materialized = 'table') }}
 
-with ranked as (
+-- LỌC TRƯỚC: loại bản ghi CDC không chuẩn hoá được, ngay trên nguồn.
+with cleaned as (
 
     select
         *,
-        {{ normalize_priority('priority_raw') }}             as priority_clean,
+        {{ normalize_priority('priority_raw') }}             as priority_clean
+    from {{ source('bronze', 'bronze_tickets_cdc') }}
+
+),
+
+valid as (select * from cleaned where priority_clean is not null),
+
+-- XẾP HẠNG SAU: mỗi ticket lấy bản ghi hợp lệ mới nhất. Nếu bản ghi mới nhất
+-- của ticket bị hỏng, ticket vẫn còn trạng thái hợp lệ từ lần cập nhật trước —
+-- ta loại BẢN GHI, không loại TICKET.
+ranked as (
+
+    select
+        *,
         row_number() over (
             partition by ticket_id
             order by event_time desc, cdc_seq desc
         ) as _rn
-    from {{ source('bronze', 'bronze_tickets_cdc') }}
+    from valid
 
 ),
 

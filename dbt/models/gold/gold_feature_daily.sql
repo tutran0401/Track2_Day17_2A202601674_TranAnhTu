@@ -29,9 +29,14 @@
 --   rõ hai vấn đề này tách nhau.
 -- ---------------------------------------------------------------------------
 
+-- Grain có HAI cột khoá: (event_date, customer_id). Window tính lại rộng hơn
+-- nghĩa là cùng một cặp được tính lại ở nhiều lượt chạy, nên phải khai unique_key
+-- để lần tính sau THAY THẾ lần tính trước thay vì cộng dồn.
 {{ config(
-    materialized     = 'incremental',
-    on_schema_change = 'fail'
+    materialized         = 'incremental',
+    unique_key           = ['event_date', 'customer_id'],
+    incremental_strategy = 'delete+insert',
+    on_schema_change     = 'fail'
 ) }}
 
 select
@@ -49,7 +54,15 @@ select
 from {{ ref('silver_events') }}
 
 {% if is_incremental() %}
-where event_date > (select max(event_date) from {{ this }})
+-- Lookback window 3 ngày. Mốc cao nhất trong bảng đích là thời điểm SỰ KIỆN xảy
+-- ra, không phải thời điểm dữ liệu TỚI kho, nên điều kiện `>` cũ vĩnh viễn không
+-- bao giờ nhìn thấy bản ghi tới muộn. Đo trên bronze_events: P99 = 2,726 ngày,
+-- max = 2,945 ngày, 5,05 % bản ghi tới muộn hơn một ngày. Lùi 3 ngày phủ hết P99
+-- và cả max quan sát được.
+--
+-- Lưu ý toán tử: `>=` nên window bao gồm cả chính mốc, tức mỗi lượt chạy tính
+-- lại BỐN partition ngày (max, max-1, max-2, max-3) chứ không phải ba.
+where event_date >= (select max(event_date) from {{ this }}) - interval 3 day
 {% endif %}
 
 group by 1, 2, 3, 4
